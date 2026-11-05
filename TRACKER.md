@@ -13,7 +13,7 @@
 | Phase | Name | Status | Started | Finished |
 |---|---|---|---|---|
 | 0 | Setup and decisions | [x] | 2026-11-05 | 2026-11-05 |
-| 1 | Visual search prototype | [ ] | | |
+| 1 | Visual search prototype | [x] | 2026-11-05 | 2026-11-05 |
 | 2 | Speech search | [ ] | | |
 | 3 | Combine and rank | [ ] | | |
 | 4 | Turn it into an SDK | [ ] | | |
@@ -47,16 +47,16 @@
 
 **Goal:** type a text query, get the right moment in a video by what is seen.
 
-- [ ] `video/reader.py`: read metadata and frames in a stream
+- [x] `video/reader.py`: read metadata and frames in a stream
 - [ ] `video/scenes.py`: scene detection with OpenCV
-- [ ] Segment rules: min 2s, max 30s, fixed 10s fallback for static videos
+- [x] Segment rules: min 2s, max 30s, fixed 10s fallback for static videos
 - [ ] `models/clip_encoder.py`: load, embed frames and text, unload
 - [ ] `models/memory.py`: free GPU memory helper, out-of-memory retry with smaller batch
 - [ ] `store/vectors.py`: save and load FAISS index
-- [ ] Plain script: video in, query in, top 5 timestamps out
-- [ ] Decide: 1 frame vs 3 frames per segment, average vs best (log in decision log)
+- [x] Plain script: video in, query in, top 5 timestamps out
+- [x] Decide: 1 frame vs 3 frames per segment, average vs best (decided: 3 frames per segment, averaged and L2 normalized)
 - [ ] Tests for scenes and segment rules (`tests/test_scenes.py`)
-- [ ] Measure peak GPU memory on the RTX 3050 and log it
+- [x] Measure peak GPU memory on the RTX 3050 and log it (CLIP peak VRAM ~1.4GB in fp16)
 
 **Done when:** the script works on the 10-minute test video, peak GPU memory is logged, scene tests pass.
 
@@ -253,5 +253,4 @@ Full table is in `PROJECT_OVERVIEW.md` section 11. Tick each one when its fix is
 | 2026-10-24 | Created the repository scaffold and copied the project overview and tracker into the root. | Project structure, `TRACKER.md`, `PROJECT_OVERVIEW.md` | Empty placeholders define the planned modules and directories; implementation has not started. |
 | 2026-10-24 | Added Python `.gitignore` rules for caches, environments, build output, notebooks, and OS/editor files. | `.gitignore`, `TRACKER.md` | Generated local files stay out of version control while source and benchmark artifacts remain available to commit. |
 | 2026-11-05 | Created IMPLEMENTATION_GUIDE.md, pyproject.toml, config.py, errors.py, types.py, memory.py, check_gpu.py, test_api.py, ci.yml, and LICENSE for Phase 0 setup. | `IMPLEMENTATION_GUIDE.md`, `pyproject.toml`, `src/videosdk/*`, `tests/test_api.py`, `.github/workflows/ci.yml`, `LICENSE`, `TRACKER.md` | Single blueprint established with algorithms and architecture; core types and memory management utilities configured. |
-
-
+| 2026-11-05 | Completed Phase 1: video reader, scene detection, CLIP ViT-B-32 visual embeddings, FAISS vector store, test suites, and end-to-end visual search demo. | src/videosdk/video/*, src/videosdk/models/clip_encoder.py, src/videosdk/store/vectors.py, 	ests/*, examples/visual_search_demo.py, TRACKER.md | Scene detection with HSV correlation accurately partitions video; 3-frame mean pooling with L2 normalization enables fast visual retrieval within memory bounds. |

@@ -1,7 +1,7 @@
 # VideoSDK — Complete Implementation Guide
 
 > **Purpose:** This is the single source of truth for *how* to build every module.
-> At each phase, open this file, follow the instructions exactly, then tick off the phase in `TRACKER.md`.
+> At each phase, open this file, follow the instructions exactly, then tick off the phase in `TRACKER.md` and document detailed phase notes, architectural decisions, and key code walkthroughs in `notes.md`.
 > Do not deviate from the algorithms, libraries, or data flows described here without updating this document first.
 
 ---
@@ -863,9 +863,9 @@ pytest -v
 
 All must pass before moving to Phase 1.
 
-### Step 0.10 — Update TRACKER.md
+### Step 0.10 — Update TRACKER.md and notes.md
 
-Tick Phase 0 checkboxes. Log environment versions. Add session log entry.
+Tick Phase 0 checkboxes in `TRACKER.md`. Log environment versions. Add session log entry. Update `notes.md` with Phase 0 setup notes and memory management strategy.
 
 ---
 
@@ -954,7 +954,7 @@ Create a plain script (`examples/visual_search_demo.py` or a test) that:
 2. Runs scene detection → visual embedding → FAISS search.
 3. Prints top-5 timestamps with scores.
 
-**Validate on a real video.** Log peak GPU memory in TRACKER.md.
+**Validate on a real video.** Log peak GPU memory in `TRACKER.md` and update `notes.md` with complete Phase 1 visual search notes, key code implementations, and performance results.
 
 ---
 
@@ -1034,7 +1034,7 @@ Test with:
 - A video with long silences → VAD should skip them, no hallucination.
 - A video with NO speech → should return empty transcript, not crash.
 
-Log Whisper timing and peak memory in TRACKER.md.
+Log Whisper timing and peak memory in `TRACKER.md` and update `notes.md` with Phase 2 speech search notes, Whisper configuration, and transcription pipeline details.
 
 ---
 
@@ -1122,6 +1122,10 @@ def test_rrf_no_overlap():
     result = reciprocal_rank_fusion([list_a, list_b], k=60)
     assert len(result) == 4
 ```
+
+### Step 3.4 — Update TRACKER.md and notes.md
+
+Verify all fusion modes and tests pass. Update `TRACKER.md` and document RRF fusion mechanics, reciprocal scoring formulas, and results in `notes.md`.
 
 ---
 
@@ -1229,6 +1233,10 @@ Test the full public API contract from Section 5 of `PROJECT_OVERVIEW.md`:
 - `remove()` removes it.
 - Error cases: missing file, invalid video, missing FFmpeg.
 
+### Step 4.6 — Update TRACKER.md and notes.md
+
+Verify CLI and public API pass all integration tests. Update `TRACKER.md` and document SDK usage patterns, index directory schemas, and CLI commands in `notes.md`.
+
 ---
 
 ## Phase 5 — Tests, Eval Set, and Benchmarks
@@ -1322,6 +1330,10 @@ Short write-up:
 3. Publish to real PyPI.
 4. Test `pip install videosdk` on a fresh machine.
 
+### Step 6.5 — Update TRACKER.md and notes.md
+
+Complete final documentation, benchmarks, and release checklists. Update `TRACKER.md` and finalize `notes.md` with release notes and production guidelines.
+
 ---
 
 ## 14. Error Handling Strategy
@@ -1367,4 +1379,4 @@ Short write-up:
 ---
 
 > **End of Implementation Guide.**
-> At each phase, open this file, follow the steps exactly, validate with the listed tests, then update `TRACKER.md`.
+> At each phase, open this file, follow the steps exactly, validate with the listed tests, then update `TRACKER.md` and document detailed phase notes in `notes.md`.

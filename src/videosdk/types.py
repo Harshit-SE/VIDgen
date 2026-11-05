@@ -3,6 +3,18 @@
 from dataclasses import dataclass
 
 
+@dataclass(frozen=True)
+class VideoMeta:
+    """Basic technical metadata extracted from a video container."""
+
+    path: str
+    fps: float
+    frame_count: int
+    width: int
+    height: int
+    duration: float
+
+
 @dataclass
 class SearchResult:
     """A single search result pointing to a moment in a video."""

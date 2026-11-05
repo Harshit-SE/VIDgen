@@ -41,7 +41,7 @@ def cut_clip(video_path: str, start: float, end: float, output_path: str) -> str
         output_path,
     ]
 
-    result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
         raise RuntimeError(f"FFmpeg clipping failed: {result.stderr}")
 
