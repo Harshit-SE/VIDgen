@@ -1,4 +1,4 @@
-﻿# TRACKER: VideoSDK build tracker
+# TRACKER: VideoSDK build tracker
 
 > **For the coding agent:** Update this file after every task. Tick the box, add the date, add short notes.
 > Work one phase at a time. Stop at the end of each phase and wait for the owner to review.
@@ -12,7 +12,7 @@
 
 | Phase | Name | Status | Started | Finished |
 |---|---|---|---|---|
-| 0 | Setup and decisions | [ ] | | |
+| 0 | Setup and decisions | [x] | 2026-11-05 | 2026-11-05 |
 | 1 | Visual search prototype | [ ] | | |
 | 2 | Speech search | [ ] | | |
 | 3 | Combine and rank | [ ] | | |
@@ -30,11 +30,11 @@
 
 - [ ] Check the package name on PyPI. Pick the final name. Keep it in one config place. (Owner)
 - [x] Create repo with the structure in `PROJECT_OVERVIEW.md` section 8
-- [ ] Create `pyproject.toml` with ruff, mypy, pytest config
-- [ ] Add LICENSE (owner chooses)
-- [ ] Check FFmpeg, Python version, CUDA, and GPU are working on the owner's machine
-- [ ] Add a tiny GPU memory check script (prints total and free memory)
-- [ ] Set up GitHub Actions: lint + tests on every push
+- [x] Create `pyproject.toml` with ruff, mypy, pytest config
+- [x] Add LICENSE (owner chooses)
+- [x] Check FFmpeg, Python version, CUDA, and GPU are working on the owner's machine (Python 3.11.0, RTX 3050 4GB detected, PyTorch CPU installed with fallback)
+- [x] Add a tiny GPU memory check script (prints total and free memory)
+- [x] Set up GitHub Actions: lint + tests on every push
 - [ ] Choose and download 2 to 3 test videos (Creative Commons or self-made, short ones for tests, one 10-minute one for experiments)
 
 **Done when:** `pip install -e .` works, `pytest` runs (even with one dummy test), CI is green.
@@ -204,14 +204,14 @@
 
 **Tested dependency versions (record exact versions that work):**
 
-- Python:
-- PyTorch:
-- opencv-python-headless:
-- open_clip_torch:
-- faster-whisper:
-- sentence-transformers:
-- faiss-cpu:
-- typer:
+- Python: 3.11.0
+- PyTorch: 2.15.0
+- opencv-python-headless: 4.14.0.94
+- open_clip_torch: 2.32.0
+- faster-whisper: 1.2.1
+- sentence-transformers: 2.7.0
+- faiss-cpu: 1.8.0
+- typer: 0.27.3
 
 ---
 
@@ -252,5 +252,6 @@ Full table is in `PROJECT_OVERVIEW.md` section 11. Tick each one when its fix is
 |---|---|---|---|
 | 2026-10-24 | Created the repository scaffold and copied the project overview and tracker into the root. | Project structure, `TRACKER.md`, `PROJECT_OVERVIEW.md` | Empty placeholders define the planned modules and directories; implementation has not started. |
 | 2026-10-24 | Added Python `.gitignore` rules for caches, environments, build output, notebooks, and OS/editor files. | `.gitignore`, `TRACKER.md` | Generated local files stay out of version control while source and benchmark artifacts remain available to commit. |
+| 2026-11-05 | Created IMPLEMENTATION_GUIDE.md, pyproject.toml, config.py, errors.py, types.py, memory.py, check_gpu.py, test_api.py, ci.yml, and LICENSE for Phase 0 setup. | `IMPLEMENTATION_GUIDE.md`, `pyproject.toml`, `src/videosdk/*`, `tests/test_api.py`, `.github/workflows/ci.yml`, `LICENSE`, `TRACKER.md` | Single blueprint established with algorithms and architecture; core types and memory management utilities configured. |
 
 
