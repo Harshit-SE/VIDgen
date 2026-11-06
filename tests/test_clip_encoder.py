@@ -5,6 +5,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+pytest.importorskip("open_clip")
+pytest.importorskip("torch")
+
 from videosdk.config import Config
 from videosdk.models.clip_encoder import CLIPEncoder, embed_segments
 
@@ -77,4 +80,3 @@ def test_embed_segments(tmp_path: Path) -> None:
     for vec in embeddings:
         norm = float(np.linalg.norm(vec))
         assert pytest.approx(norm, rel=1e-3) == 1.0
-

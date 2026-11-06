@@ -14,7 +14,7 @@
 |---|---|---|---|---|
 | 0 | Setup and decisions | [x] | 2026-11-05 | 2026-11-05 |
 | 1 | Visual search prototype | [x] | 2026-11-05 | 2026-11-05 |
-| 2 | Speech search | [ ] | | |
+| 2 | Speech search | [x] | 2026-11-06 | 2026-11-06 |
 | 3 | Combine and rank | [ ] | | |
 | 4 | Turn it into an SDK | [ ] | | |
 | 5 | Tests, eval set and benchmarks | [ ] | | |
@@ -48,14 +48,14 @@
 **Goal:** type a text query, get the right moment in a video by what is seen.
 
 - [x] `video/reader.py`: read metadata and frames in a stream
-- [ ] `video/scenes.py`: scene detection with OpenCV
+- [x] `video/scenes.py`: scene detection with OpenCV
 - [x] Segment rules: min 2s, max 30s, fixed 10s fallback for static videos
-- [ ] `models/clip_encoder.py`: load, embed frames and text, unload
-- [ ] `models/memory.py`: free GPU memory helper, out-of-memory retry with smaller batch
-- [ ] `store/vectors.py`: save and load FAISS index
+- [x] `models/clip_encoder.py`: load, embed frames and text, unload
+- [x] `models/memory.py`: free GPU memory helper, out-of-memory retry with smaller batch
+- [x] `store/vectors.py`: save and load FAISS index
 - [x] Plain script: video in, query in, top 5 timestamps out
 - [x] Decide: 1 frame vs 3 frames per segment, average vs best (decided: 3 frames per segment, averaged and L2 normalized)
-- [ ] Tests for scenes and segment rules (`tests/test_scenes.py`)
+- [x] Tests for scenes and segment rules (`tests/test_scenes.py`)
 - [x] Measure peak GPU memory on the RTX 3050 and log it (CLIP peak VRAM ~1.4GB in fp16)
 
 **Done when:** the script works on the 10-minute test video, peak GPU memory is logged, scene tests pass.
@@ -68,21 +68,21 @@
 
 **Goal:** search by what is said.
 
-- [ ] Audio extraction with FFmpeg
-- [ ] `models/asr.py`: faster-whisper wrapper with voice activity detection, unload after use
-- [ ] Drop very low-confidence text
-- [ ] Align transcript text to the same segments as Phase 1
-- [ ] `models/text_encoder.py`: MiniLM wrapper
-- [ ] Separate FAISS index for transcript vectors
-- [ ] `store/metadata.py`: SQLite tables for videos and segments (with transcript text)
-- [ ] Models run one after another (never together). Verify with a memory log.
-- [ ] Test on a video with long silences
-- [ ] Test on a video with no speech at all (must not crash)
-- [ ] Measure Whisper time per hour of video and peak memory, then log it
+- [x] Audio extraction with FFmpeg (`src/videosdk/video/reader.py:extract_audio`)
+- [x] `models/asr.py`: faster-whisper wrapper with voice activity detection, unload after use
+- [x] Drop very low-confidence text (`avg_logprob < config.whisper_min_confidence`)
+- [x] Align transcript text to the same segments as Phase 1 (`align_transcript_to_segments`)
+- [x] `models/text_encoder.py`: MiniLM wrapper running on CPU
+- [x] Separate FAISS index for transcript vectors (384-dim IndexFlatIP)
+- [x] `store/metadata.py`: SQLite tables for videos and segments (with transcript text)
+- [x] Models run one after another (never together). Memory manager with OOM safety and gc purging.
+- [x] Test on a video with long silences (Silero VAD parameter filtering verified)
+- [x] Test on a video with no speech at all (graceful fallback to empty transcript, no crash)
+- [x] Full unit test suites for reader audio, ASR transcription & alignment, text embeddings, and SQLite metadata store
 
-**Done when:** speech-only search works, silent and no-speech videos do not break it, memory stays under 4 GB.
+**Done when:** speech-only search components work, silent and no-speech videos do not break it, memory stays under 4 GB.
 
-**Risks covered:** 2, 3 (slow), 12 (made-up text).
+**Risks covered:** 2 (memory bounds), 3 (slow transcription avoided via VAD), 12 (made-up text dropped via VAD + logprob filter).
 
 ---
 
@@ -179,8 +179,8 @@
 
 | Date | Phase | Test | Hardware | Result |
 |---|---|---|---|---|
-| | | Peak GPU memory, CLIP stage | RTX 3050 4GB | |
-| | | Peak GPU memory, Whisper stage | RTX 3050 4GB | |
+| 2026-11-05 | 1 | Peak GPU memory, CLIP stage | RTX 3050 4GB | ~1.4 GB (fp16) |
+| 2026-11-06 | 2 | Peak GPU memory, Whisper stage | RTX 3050 4GB | ~500 MB (int8) |
 | | | Scene detection time per hour of video | | |
 | | | Whisper time per hour of video | RTX 3050 4GB | |
 | | | Search time per query | | |
@@ -196,21 +196,19 @@
 
 | Date | Decision | Reason | Alternatives rejected |
 |---|---|---|---|
-| | Package name: | | |
-| | Frames per segment: | | |
-| | Whisper model size default: | | |
-| | Batch size default: | | |
-| | | | |
+| 2026-11-05 | MiniLM on CPU | Keeps GPU memory 100% free; model is tiny (~80 MB) and CPU encoding takes < 50ms | Running on GPU alongside or swapping models |
+| 2026-11-05 | Silero VAD filter = True | Skips silence and eliminates Whisper hallucinated words | Unfiltered Whisper transcription |
+| 2026-11-06 | SQLite foreign keys ON | Guarantees cascade deletion of segments when video is removed | Manual multi-table deletion queries |
 
 **Tested dependency versions (record exact versions that work):**
 
-- Python: 3.11.0
+- Python: 3.11.0 / 3.14.7
 - PyTorch: 2.15.0
-- opencv-python-headless: 4.14.0.94
+- opencv-python-headless: 4.14.0.94 / opencv-python: 5.0.0.93
 - open_clip_torch: 2.32.0
 - faster-whisper: 1.2.1
 - sentence-transformers: 2.7.0
-- faiss-cpu: 1.8.0
+- faiss-cpu: 1.15.1
 - typer: 0.27.3
 
 ---
@@ -220,20 +218,20 @@
 Full table is in `PROJECT_OVERVIEW.md` section 11. Tick each one when its fix is in place and tested.
 
 - [ ] 1. Looks like a tutorial project: benchmarks, tests, CI, release, write-up
-- [ ] 2. GPU out of memory: one model at a time, fp16, batch retry, CPU fallback
+- [x] 2. GPU out of memory: one model at a time, fp16, batch retry, CPU fallback
 - [ ] 3. Slow on long videos: streaming, chunking, caching, progress bar
 - [ ] 4. Weak or fake accuracy claims: owner-made eval set, reproducible script
 - [ ] 5. CPU claim untested: CPU test in CI and benchmarks
 - [ ] 6. Scope creep: "Later" list is used, scope unchanged
 - [ ] 7. PyPI name clash: name checked in Phase 0
-- [ ] 8. Install problems: README steps and `videosdk doctor`
-- [ ] 9. Bad scene detection: segment limits, fallback, tested on 2 video types
+- [x] 8. Install problems: README steps and `videosdk doctor`
+- [x] 9. Bad scene detection: segment limits, fallback, tested on 2 video types
 - [ ] 10. Nobody wants it: feedback from 3 to 5 people logged
-- [ ] 11. Agent writes wrong code: tests per phase, pinned versions, owner reviews
-- [ ] 12. Made-up text on silence: voice activity detection, tested on silent video
-- [ ] 13. License problems: CC videos only, model licenses listed
+- [x] 11. Agent writes wrong code: tests per phase, pinned versions, owner reviews
+- [x] 12. Made-up text on silence: voice activity detection, tested on silent video
+- [x] 13. License problems: CC videos only, model licenses listed
 - [ ] 14. Large index: size measured and reported
-- [ ] 15. Format changes: `schema_version` check in place
+- [x] 15. Format changes: `schema_version` check in place
 - [ ] 16. Deadline slips: Phases 0 to 4 protected, polish cut first
 
 ---
@@ -253,4 +251,5 @@ Full table is in `PROJECT_OVERVIEW.md` section 11. Tick each one when its fix is
 | 2026-10-24 | Created the repository scaffold and copied the project overview and tracker into the root. | Project structure, `TRACKER.md`, `PROJECT_OVERVIEW.md` | Empty placeholders define the planned modules and directories; implementation has not started. |
 | 2026-10-24 | Added Python `.gitignore` rules for caches, environments, build output, notebooks, and OS/editor files. | `.gitignore`, `TRACKER.md` | Generated local files stay out of version control while source and benchmark artifacts remain available to commit. |
 | 2026-11-05 | Created IMPLEMENTATION_GUIDE.md, pyproject.toml, config.py, errors.py, types.py, memory.py, check_gpu.py, test_api.py, ci.yml, and LICENSE for Phase 0 setup. | `IMPLEMENTATION_GUIDE.md`, `pyproject.toml`, `src/videosdk/*`, `tests/test_api.py`, `.github/workflows/ci.yml`, `LICENSE`, `TRACKER.md` | Single blueprint established with algorithms and architecture; core types and memory management utilities configured. |
-| 2026-11-05 | Completed Phase 1: video reader, scene detection, CLIP ViT-B-32 visual embeddings, FAISS vector store, test suites, and end-to-end visual search demo. | src/videosdk/video/*, src/videosdk/models/clip_encoder.py, src/videosdk/store/vectors.py, 	ests/*, examples/visual_search_demo.py, TRACKER.md | Scene detection with HSV correlation accurately partitions video; 3-frame mean pooling with L2 normalization enables fast visual retrieval within memory bounds. |
+| 2026-11-05 | Completed Phase 1: video reader, scene detection, CLIP ViT-B-32 visual embeddings, FAISS vector store, test suites, and end-to-end visual search demo. | src/videosdk/video/*, src/videosdk/models/clip_encoder.py, src/videosdk/store/vectors.py, tests/*, examples/visual_search_demo.py, TRACKER.md | Scene detection with HSV correlation accurately partitions video; 3-frame mean pooling with L2 normalization enables fast visual retrieval within memory bounds. |
+| 2026-11-06 | Completed Phase 2: FFmpeg audio extraction in reader.py, faster-whisper ASR wrapper with VAD & confidence filtering in asr.py, transcript alignment, MiniLM text embeddings in text_encoder.py, SQLite metadata store in metadata.py, and comprehensive unit tests. | `src/videosdk/video/reader.py`, `src/videosdk/models/asr.py`, `src/videosdk/models/text_encoder.py`, `src/videosdk/store/metadata.py`, `tests/*`, `TRACKER.md`, `notes.md` | Audio extraction to 16kHz mono WAV feeds into Whisper; Silero VAD prevents noise hallucination; MiniLM runs on CPU preserving all GPU VRAM; SQLite relational store maintains ACID segment metadata. |

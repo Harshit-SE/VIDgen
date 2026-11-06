@@ -5,17 +5,26 @@ import logging
 from collections.abc import Callable
 from typing import Any, TypeVar
 
-import torch
+try:
+    import torch
+
+    TORCH_AVAILABLE = True
+except ImportError:
+    torch = None  # type: ignore[assignment]
+    TORCH_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 T = TypeVar("T")
 
 
-def get_device(preference: str = "auto") -> torch.device:
-    """Resolve device preference ('auto', 'cuda', 'cpu') to torch.device.
+def get_device(preference: str = "auto") -> Any:
+    """Resolve device preference ('auto', 'cuda', 'cpu') to torch.device or string.
 
     If 'auto' or 'cuda' requested but CUDA is not available, falls back to CPU.
     """
+    if not TORCH_AVAILABLE:
+        return "cpu"
+
     preference = preference.lower().strip()
     if preference in ("auto", "cuda"):
         if torch.cuda.is_available():
@@ -28,7 +37,7 @@ def get_device(preference: str = "auto") -> torch.device:
 
 def get_gpu_memory() -> dict[str, float]:
     """Return total, allocated, and free GPU memory in megabytes (MB)."""
-    if not torch.cuda.is_available():
+    if not TORCH_AVAILABLE or not torch.cuda.is_available():
         return {"total_mb": 0.0, "allocated_mb": 0.0, "free_mb": 0.0}
 
     total_bytes = torch.cuda.get_device_properties(0).total_memory
@@ -54,7 +63,7 @@ def unload_model(model: Any) -> None:
     if model is not None:
         del model
     gc.collect()
-    if torch.cuda.is_available():
+    if TORCH_AVAILABLE and torch.cuda.is_available():
         torch.cuda.empty_cache()
 
 
@@ -74,7 +83,11 @@ def oom_retry(
     while current_batch_size >= min_batch_size:
         try:
             return fn(*args, batch_size=current_batch_size, **kwargs)
-        except torch.cuda.OutOfMemoryError:
+        except Exception as exc:
+            is_oom = TORCH_AVAILABLE and isinstance(exc, torch.cuda.OutOfMemoryError)
+            if not is_oom:
+                raise
+
             logger.warning(
                 "CUDA OOM with batch size %d. Attempting recovery...", current_batch_size
             )
@@ -85,7 +98,7 @@ def oom_retry(
                     "CUDA OOM at minimum batch size %d. Falling back to CPU.", min_batch_size
                 )
                 if "device" in kwargs:
-                    kwargs["device"] = torch.device("cpu")
+                    kwargs["device"] = torch.device("cpu") if TORCH_AVAILABLE else "cpu"
                 return fn(*args, batch_size=1, **kwargs)
             current_batch_size = max(min_batch_size, next_batch_size)
 

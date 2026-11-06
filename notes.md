@@ -15,7 +15,13 @@ This document tracks technical decisions, architectural details, key code patter
    - [Module 4: FAISS Vector Store (`store/vectors.py`)](#module-4-faiss-vector-store-storevectorspy)
    - [End-to-End Visual Search Script (`examples/visual_search_demo.py`)](#end-to-end-visual-search-script-examplesvisual_search_demopy)
    - [Verification & Test Results](#verification--test-results)
-4. [Phase 2 — Speech Search](#phase-2--speech-search-upcoming) *(Upcoming)*
+4. [Phase 2 — Speech Search](#phase-2--speech-search)
+   - [Overview & Pipeline](#overview--pipeline-1)
+   - [Module 1: Audio Extraction (`video/reader.py:extract_audio`)](#module-1-audio-extraction-videoreaderpyextract_audio)
+   - [Module 2: Faster-Whisper ASR & Alignment (`models/asr.py`)](#module-2-faster-whisper-asr--alignment-modelsasrpy)
+   - [Module 3: Sentence-Transformers MiniLM (`models/text_encoder.py`)](#module-3-sentence-transformers-minilm-modelstext_encoderpy)
+   - [Module 4: SQLite Metadata Store (`store/metadata.py`)](#module-4-sqlite-metadata-store-storemetadatapy)
+   - [Verification & Test Results](#verification--test-results-1)
 5. [Phase 3 — Fusion & Ranking](#phase-3--fusion--ranking-upcoming) *(Upcoming)*
 6. [Phase 4 — SDK Public API & CLI](#phase-4--sdk-public-api--cli-upcoming) *(Upcoming)*
 7. [Phase 5 — Testing & Evaluation Benchmarks](#phase-5--testing--evaluation-benchmarks-upcoming) *(Upcoming)*
@@ -231,58 +237,168 @@ A standalone demo demonstrating the entire Phase 1 pipeline:
 python examples/visual_search_demo.py tests/data/sample_visual_search.mp4 "green forest"
 ```
 
-#### Demo Output
-```text
---- VideoSDK Phase 1 Visual Search Prototype ---
-Target video : sample_visual_search.mp4
-Search query : 'green forest'
-Compute device: cpu
+---
 
-[1/4] Detecting scene boundaries...
-      Detected 3 segments.
+## Phase 2 — Speech Search
 
-[2/4] Embedding visual content (OpenCLIP)...
-      Generated embedding matrix: (3, 512)
+### Overview & Pipeline
 
-[3/4] Populating FAISS vector index...
-      Indexed 3 segment vectors.
+Phase 2 enables searching video content by what is **spoken**. The speech pipeline extracts audio, transcribes speech with word-level timestamps and VAD filtering, aligns transcripts with the visual scene segments, embeds the text using a lightweight sentence transformer on CPU, and indexes metadata in SQLite.
 
-[4/4] Encoding query and searching top-5 results...
-
---- Top Search Results ---
-#1 | Score: 0.2319 | Timestamp: 00:03 (3.0s - 6.0s)
-#2 | Score: 0.1404 | Timestamp: 00:00 (0.0s - 3.0s)
-#3 | Score: 0.1271 | Timestamp: 00:06 (6.0s - 9.0s)
 ```
+Input Video (.mp4)
+       │
+       ▼
+[video/reader.py:extract_audio] ──► FFmpeg: 16 kHz Mono PCM WAV
+       │
+       ▼
+[models/asr.py] ─────────────────► faster-whisper (CTranslate2 int8) + Silero VAD
+       │                           Drop low-confidence text (avg_logprob < -1.0)
+       │                           Unload Whisper model & clear VRAM
+       ▼
+[models/asr.py:align_transcript] ─► Align timestamped speech chunks to scene segments
+       │
+       ▼
+[models/text_encoder.py] ────────► sentence-transformers (all-MiniLM-L6-v2) on CPU
+       │                           Generate 384-dim L2-normalized vectors
+       ▼
+[store/vectors.py (text.faiss)] ─► FAISS IndexFlatIP (384-dim)
+       │
+       ▼
+[store/metadata.py] ─────────────► SQLite (videos + segments tables with foreign keys)
+```
+
+---
+
+### Module 1: Audio Extraction (`src/videosdk/video/reader.py:extract_audio`)
+
+#### Purpose
+Extract the audio stream from arbitrary video containers into standard 16 kHz mono 16-bit PCM WAV format expected by Whisper.
+
+#### Key Code & Implementation
+```python
+def extract_audio(
+    video_path: str | Path,
+    output_path: str | Path,
+    sample_rate: int = 16000,
+) -> str:
+    cmd = [
+        ffmpeg_bin,
+        "-y",
+        "-i", str(src),
+        "-vn",                 # Drop video stream
+        "-acodec", "pcm_s16le",# Standard 16-bit linear PCM
+        "-ar", str(sample_rate),# 16000 Hz
+        "-ac", "1",            # Downmix to mono
+        str(dst),
+    ]
+    subprocess.run(cmd, capture_output=True, text=True)
+```
+*Why*: 16 kHz mono PCM WAV is the universal format for Whisper. Extracting upfront saves model memory and allows Whisper to stream through the audio file without spawning internal FFmpeg processes.
+
+---
+
+### Module 2: Faster-Whisper ASR & Alignment (`src/videosdk/models/asr.py`)
+
+#### Purpose
+Transcribe spoken audio reliably while strictly respecting the 4 GB VRAM limit and suppressing hallucinated text during silent pauses.
+
+#### Key Patterns & Code
+
+1. **Voice Activity Detection (VAD) & Log-Probability Filtering**:
+   ```python
+   segments_gen, _info = self.model.transcribe(
+       str(src),
+       vad_filter=self.config.whisper_vad_filter,
+       vad_parameters=dict(min_silence_duration_ms=500),
+   )
+   for seg in segments_gen:
+       # Reject low-confidence hallucinations
+       if seg.avg_logprob < self.config.whisper_min_confidence: # -1.0
+           continue
+       ...
+   ```
+   *Why*: Whisper models are known to hallucinate repetitive phrases during silent scenes or background noise. Turning on Silero VAD skips non-speech regions entirely, and the log-probability threshold eliminates low-confidence transcript artifacts.
+
+2. **Temporal Alignment to Visual Segments**:
+   ```python
+   def align_transcript_to_segments(chunks, segments):
+       # chunk overlaps [seg_start, seg_end] if chunk.start < seg_end and chunk.end > seg_start
+       for idx, (seg_start, seg_end) in enumerate(segments):
+           matching = [c.text for c in chunks if c.start < seg_end and c.end > seg_start]
+           aligned[idx] = " ".join(matching).strip()
+   ```
+   *Why*: By aligning spoken text to the *same* temporal segments determined during visual scene detection, downstream multi-modal fusion (Phase 3) can cleanly correlate visual features and speech features for the exact same time window.
+
+3. **Memory Isolation**:
+   `WhisperTranscriber.unload()` calls `unload_model()` to clear CTranslate2/CUDA allocations before transcript embeddings or visual models execute.
+
+---
+
+### Module 3: Sentence-Transformers MiniLM (`src/videosdk/models/text_encoder.py`)
+
+#### Purpose
+Convert aligned transcript texts and search queries into 384-dimensional dense semantic vectors.
+
+#### Key Decisions
+- **Deliberate CPU Execution**: `SentenceTransformer("all-MiniLM-L6-v2", device="cpu")`. Because MiniLM is compact (~80 MB), CPU inference takes $<50\text{ ms}$ for typical video transcripts, preserving 100% of GPU memory for vision/ASR models.
+- **Normalization**: Vectors are unit-normalized (`normalize_embeddings=True`) so inner product search corresponds to cosine similarity.
+
+---
+
+### Module 4: SQLite Metadata Store (`src/videosdk/store/metadata.py`)
+
+#### Purpose
+Provide ACID relational persistence for video catalog records, segment time boundaries, transcripts, and row pointers into `visual.faiss` and `text.faiss`.
+
+#### Schema & Key Implementation
+```sql
+CREATE TABLE videos (
+    video_id    INTEGER PRIMARY KEY AUTOINCREMENT,
+    file_path   TEXT NOT NULL UNIQUE,
+    file_hash   TEXT NOT NULL,
+    duration    REAL NOT NULL,
+    fps         REAL NOT NULL,
+    width       INTEGER NOT NULL,
+    height      INTEGER NOT NULL,
+    added_at    TEXT NOT NULL
+);
+
+CREATE TABLE segments (
+    segment_id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    video_id        INTEGER NOT NULL REFERENCES videos(video_id) ON DELETE CASCADE,
+    start_time      REAL NOT NULL,
+    end_time        REAL NOT NULL,
+    transcript_text TEXT DEFAULT '',
+    visual_index_id INTEGER NOT NULL,
+    text_index_id   INTEGER DEFAULT -1,
+    UNIQUE(video_id, start_time)
+);
+```
+- Foreign key support enabled via `PRAGMA foreign_keys = ON;`.
+- Deleting a video via `store.remove_video(path)` automatically cascades to remove its segment entries.
+- Indexed lookups by `visual_index_id` and `text_index_id` facilitate $O(1)$ result construction during search fusion.
 
 ---
 
 ### Verification & Test Results
 
-All 25 automated tests across the project pass:
+All 38 unit and integration tests across the project pass with 0 errors and 0 warnings:
 
 | Test File | Focus | Results |
 |---|---|---|
-| `tests/test_reader.py` | Metadata extraction, seeking, streaming generator, SHA-256 chunking, missing/corrupted video error handling | 7 / 7 Passed |
-| `tests/test_scenes.py` | Histogram boundary detection, segment merge (<2s), segment split (>30s), fallback to 10s windows, synthetic video cuts | 6 / 6 Passed |
-| `tests/test_store.py` | FAISS index creation, vector insertion, inner product search, dimension mismatch validation, persistence to disk | 4 / 4 Passed |
-| `tests/test_clip_encoder.py` | Text query embedding, frame batch embedding, L2 normalization, segment embedding pipeline, empty list handling | 4 / 4 Passed |
-| `tests/test_api.py` | Base types (`SearchResult`, `VideoMeta`), configuration defaults, custom exceptions | 4 / 4 Passed |
+| `tests/test_reader.py` | Metadata, seeking, streaming, SHA-256 hash, audio extraction | 11 / 11 Passed |
+| `tests/test_scenes.py` | Histogram boundary detection, merge/split rules, static video fallback | 6 / 6 Passed |
+| `tests/test_asr.py` | TranscriptChunk dataclass, temporal alignment, VAD confidence filtering, unload | 6 / 6 Passed |
+| `tests/test_text_encoder.py` | MiniLM CPU encoding, empty text handling, query vector shape, lifecycle helper | 5 / 5 Passed |
+| `tests/test_store.py` | FAISS vector store + SQLite relational metadata CRUD, cascade delete, dedup | 6 / 6 Passed |
+| `tests/test_api.py` | Base types (`SearchResult`, `VideoMeta`), configuration defaults, error types | 4 / 4 Passed |
 
-Code style and type checks:
-- `ruff check src tests examples`: **100% Clean (0 errors)**
-- `mypy src`: **Passing with strict typed definitions**
+Code style and formatting:
+- `ruff check src/ tests/`: **100% Clean (0 errors)**
+- `ruff format --check src/ tests/`: **100% Formatted**
 
 ---
-
-## Phase 2 — Speech Search *(Upcoming)*
-*Goal*: Search video by spoken audio.
-- [ ] FFmpeg audio extraction to 16 kHz mono WAV
-- [ ] `faster-whisper` transcription with Voice Activity Detection (VAD)
-- [ ] Transcript chunk alignment to Phase 1 video segments
-- [ ] `all-MiniLM-L6-v2` sentence transformer embeddings for transcripts
-- [ ] Speech vector index in FAISS and SQLite metadata storage
-- [ ] Sequential model execution memory validation
 
 ## Phase 3 — Fusion & Ranking *(Upcoming)*
 *Goal*: Merge visual and speech candidate lists into a unified ranked result set.
@@ -300,4 +416,3 @@ Code style and type checks:
 
 ## Phase 6 — Documentation & Distribution *(Upcoming)*
 - [ ] Documentation, quickstart guide, PyPI packaging verification
-

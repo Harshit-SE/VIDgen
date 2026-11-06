@@ -1,20 +1,23 @@
-"""Video reading utilities: metadata extraction, frame seeking, and streaming.
+"""Video reading utilities: metadata extraction, frame seeking, streaming, and audio extraction.
 
-This module provides low-level video access using OpenCV (cv2):
+This module provides low-level video access using OpenCV (cv2) and FFmpeg:
 - Extracts container metadata (fps, frame count, resolution, duration)
 - Seeks to exact timestamps (millisecond precision)
 - Streams frames on-demand to maintain minimal memory footprint (under 4 GB constraint)
 - Generates SHA-256 hashes for deduplication and caching
+- Extracts 16 kHz mono WAV audio tracks for Whisper ASR
 """
 
 import hashlib
+import shutil
+import subprocess
 from collections.abc import Iterator, Sequence
 from pathlib import Path
 
 import cv2
 import numpy as np
 
-from videosdk.errors import InvalidVideoError, VideoNotFoundError
+from videosdk.errors import FFmpegNotFoundError, InvalidVideoError, VideoNotFoundError
 from videosdk.types import VideoMeta
 
 
@@ -170,3 +173,56 @@ def iter_frames_at_times(
             yield read_frame_at_time(cap, t)
     finally:
         cap.release()
+
+
+def extract_audio(
+    video_path: str | Path,
+    output_path: str | Path,
+    sample_rate: int = 16000,
+) -> str:
+    """Extract the audio track from a video file as a 16 kHz mono WAV file using FFmpeg.
+
+    Args:
+        video_path: Path to the source video file.
+        output_path: Destination path for the WAV audio file.
+        sample_rate: Audio sampling frequency in Hz (default: 16000 for Whisper).
+
+    Returns:
+        The output path string.
+
+    Raises:
+        VideoNotFoundError: If the source video file does not exist.
+        FFmpegNotFoundError: If FFmpeg binary is not found on the system PATH.
+        RuntimeError: If FFmpeg fails or exits with an error status.
+    """
+    src = Path(video_path)
+    if not src.is_file():
+        raise VideoNotFoundError(str(video_path))
+
+    ffmpeg_bin = shutil.which("ffmpeg")
+    if not ffmpeg_bin:
+        raise FFmpegNotFoundError()
+
+    dst = Path(output_path)
+    dst.parent.mkdir(parents=True, exist_ok=True)
+
+    cmd = [
+        ffmpeg_bin,
+        "-y",  # Overwrite existing destination file
+        "-i",
+        str(src),
+        "-vn",  # Disable video stream
+        "-acodec",
+        "pcm_s16le",  # Standard 16-bit PCM WAV
+        "-ar",
+        str(sample_rate),  # Sampling rate (16 kHz)
+        "-ac",
+        "1",  # Mono audio
+        str(dst),
+    ]
+
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(f"FFmpeg audio extraction failed: {result.stderr}")
+
+    return str(dst)

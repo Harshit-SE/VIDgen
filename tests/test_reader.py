@@ -1,15 +1,17 @@
 """Unit tests for videosdk.video.reader."""
 
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import cv2
 import numpy as np
 import pytest
 
-from videosdk.errors import InvalidVideoError, VideoNotFoundError
+from videosdk.errors import FFmpegNotFoundError, InvalidVideoError, VideoNotFoundError
 from videosdk.types import VideoMeta
 from videosdk.video.reader import (
     compute_file_hash,
+    extract_audio,
     get_video_metadata,
     iter_frames_at_times,
     read_frame_at_time,
@@ -49,24 +51,24 @@ def test_compute_file_hash_missing() -> None:
 
 
 def test_get_video_metadata(sample_video: Path) -> None:
-    """Test extracting metadata from a valid video."""
+    """Test extracting metadata from synthetic video."""
     meta = get_video_metadata(sample_video)
     assert isinstance(meta, VideoMeta)
-    assert meta.frame_count == 30
     assert meta.fps == 30.0
+    assert meta.frame_count == 30
     assert meta.width == 64
     assert meta.height == 64
     assert pytest.approx(meta.duration, rel=1e-2) == 1.0
 
 
 def test_get_video_metadata_missing() -> None:
-    """Test get_video_metadata with missing file."""
+    """Test metadata extraction fails on missing file."""
     with pytest.raises(VideoNotFoundError):
-        get_video_metadata("does_not_exist.mp4")
+        get_video_metadata("missing.mp4")
 
 
 def test_get_video_metadata_invalid(tmp_path: Path) -> None:
-    """Test get_video_metadata with an empty or non-video file."""
+    """Test metadata extraction fails on invalid/corrupted video file."""
     fake_video = tmp_path / "corrupt.mp4"
     fake_video.write_text("not a video")
     with pytest.raises(InvalidVideoError):
@@ -94,3 +96,46 @@ def test_iter_frames_at_times(sample_video: Path) -> None:
         assert isinstance(frame, np.ndarray)
         assert frame.shape == (64, 64, 3)
 
+
+def test_extract_audio_missing_video() -> None:
+    """Test that extract_audio raises VideoNotFoundError for non-existent video."""
+    with pytest.raises(VideoNotFoundError):
+        extract_audio("nonexistent.mp4", "output.wav")
+
+
+def test_extract_audio_missing_ffmpeg(sample_video: Path, tmp_path: Path) -> None:
+    """Test that extract_audio raises FFmpegNotFoundError when ffmpeg is not installed."""
+    out_wav = tmp_path / "audio.wav"
+    with patch("shutil.which", return_value=None), pytest.raises(FFmpegNotFoundError):
+        extract_audio(sample_video, out_wav)
+
+
+def test_extract_audio_success(sample_video: Path, tmp_path: Path) -> None:
+    """Test that extract_audio executes ffmpeg subprocess command with correct args."""
+    out_wav = tmp_path / "audio.wav"
+    mock_run = MagicMock(returncode=0)
+
+    with (
+        patch("shutil.which", return_value="C:\\ffmpeg\\ffmpeg.exe"),
+        patch("subprocess.run", return_value=mock_run) as mock_sp,
+    ):
+        res = extract_audio(sample_video, out_wav, sample_rate=16000)
+        assert res == str(out_wav)
+        mock_sp.assert_called_once()
+        cmd = mock_sp.call_args[0][0]
+        assert cmd[0] == "C:\\ffmpeg\\ffmpeg.exe"
+        assert "-vn" in cmd
+        assert "16000" in cmd
+
+
+def test_extract_audio_failure(sample_video: Path, tmp_path: Path) -> None:
+    """Test that extract_audio raises RuntimeError when ffmpeg exits with error code."""
+    out_wav = tmp_path / "audio.wav"
+    mock_run = MagicMock(returncode=1, stderr="Error decoding stream")
+
+    with (
+        patch("shutil.which", return_value="/usr/bin/ffmpeg"),
+        patch("subprocess.run", return_value=mock_run),
+        pytest.raises(RuntimeError, match="FFmpeg audio extraction failed"),
+    ):
+        extract_audio(sample_video, out_wav)

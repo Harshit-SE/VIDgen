@@ -91,9 +91,7 @@ class VectorStore:
             query = query.reshape(1, -1)
 
         if query.shape[1] != self.dim:
-            raise ValueError(
-                f"Query dimension mismatch: got {query.shape[1]}, expected {self.dim}"
-            )
+            raise ValueError(f"Query dimension mismatch: got {query.shape[1]}, expected {self.dim}")
 
         if self.index is None or self.index.ntotal == 0:
             return np.empty(0, dtype=np.float32), np.empty(0, dtype=np.int64)
