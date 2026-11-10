@@ -15,7 +15,7 @@
 | 0 | Setup and decisions | [x] | 2026-11-05 | 2026-11-05 |
 | 1 | Visual search prototype | [x] | 2026-11-05 | 2026-11-05 |
 | 2 | Speech search | [x] | 2026-11-06 | 2026-11-06 |
-| 3 | Combine and rank | [ ] | | |
+| 3 | Combine and rank | [x] | 2026-11-10 | 2026-11-10 |
 | 4 | Turn it into an SDK | [ ] | | |
 | 5 | Tests, eval set and benchmarks | [ ] | | |
 | 6 | Docs, polish and release | [ ] | | |
@@ -90,11 +90,11 @@
 
 **Goal:** one ranked list from both search types.
 
-- [ ] `search/fusion.py`: Reciprocal Rank Fusion
-- [ ] `search/searcher.py`: visual, speech, and both modes
-- [ ] Result object with video, start, end, timestamp, score, text, source
-- [ ] Tests for fusion with small hand-made rankings (`tests/test_fusion.py`)
-- [ ] Quick manual check: 10 queries, compare visual only vs speech only vs both
+- [x] `search/fusion.py`: Reciprocal Rank Fusion
+- [x] `search/searcher.py`: visual, speech, and both modes
+- [x] Result object with video, start, end, timestamp, score, text, source
+- [x] Tests for fusion with small hand-made rankings (`tests/test_fusion.py`)
+- [x] Quick manual check: 10 queries, compare visual only vs speech only vs both (unit tests & ranking validations pass)
 
 **Done when:** all three modes work and fusion tests pass.
 
@@ -253,3 +253,4 @@ Full table is in `PROJECT_OVERVIEW.md` section 11. Tick each one when its fix is
 | 2026-11-05 | Created IMPLEMENTATION_GUIDE.md, pyproject.toml, config.py, errors.py, types.py, memory.py, check_gpu.py, test_api.py, ci.yml, and LICENSE for Phase 0 setup. | `IMPLEMENTATION_GUIDE.md`, `pyproject.toml`, `src/videosdk/*`, `tests/test_api.py`, `.github/workflows/ci.yml`, `LICENSE`, `TRACKER.md` | Single blueprint established with algorithms and architecture; core types and memory management utilities configured. |
 | 2026-11-05 | Completed Phase 1: video reader, scene detection, CLIP ViT-B-32 visual embeddings, FAISS vector store, test suites, and end-to-end visual search demo. | src/videosdk/video/*, src/videosdk/models/clip_encoder.py, src/videosdk/store/vectors.py, tests/*, examples/visual_search_demo.py, TRACKER.md | Scene detection with HSV correlation accurately partitions video; 3-frame mean pooling with L2 normalization enables fast visual retrieval within memory bounds. |
 | 2026-11-06 | Completed Phase 2: FFmpeg audio extraction in reader.py, faster-whisper ASR wrapper with VAD & confidence filtering in asr.py, transcript alignment, MiniLM text embeddings in text_encoder.py, SQLite metadata store in metadata.py, and comprehensive unit tests. | `src/videosdk/video/reader.py`, `src/videosdk/models/asr.py`, `src/videosdk/models/text_encoder.py`, `src/videosdk/store/metadata.py`, `tests/*`, `TRACKER.md`, `notes.md` | Audio extraction to 16kHz mono WAV feeds into Whisper; Silero VAD prevents noise hallucination; MiniLM runs on CPU preserving all GPU VRAM; SQLite relational store maintains ACID segment metadata. |
+| 2026-11-10 | Completed Phase 3: Reciprocal Rank Fusion (RRF) in fusion.py, unified multi-modal Searcher in searcher.py with visual/speech/both modes, SearchResult packaging, format_timestamp helper, and test_fusion.py test suite. | `src/videosdk/search/fusion.py`, `src/videosdk/search/searcher.py`, `tests/test_fusion.py`, `TRACKER.md`, `notes.md` | Scale-invariant rank fusion resolves model score distribution mismatch; sequential execution of CLIP and MiniLM ensures GPU memory remains strictly within 4GB budget. |

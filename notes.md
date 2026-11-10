@@ -22,7 +22,11 @@ This document tracks technical decisions, architectural details, key code patter
    - [Module 3: Sentence-Transformers MiniLM (`models/text_encoder.py`)](#module-3-sentence-transformers-minilm-modelstext_encoderpy)
    - [Module 4: SQLite Metadata Store (`store/metadata.py`)](#module-4-sqlite-metadata-store-storemetadatapy)
    - [Verification & Test Results](#verification--test-results-1)
-5. [Phase 3 — Fusion & Ranking](#phase-3--fusion--ranking-upcoming) *(Upcoming)*
+5. [Phase 3 — Fusion & Ranking](#phase-3--fusion--ranking)
+   - [Overview & Pipeline](#overview--pipeline-2)
+   - [Module 1: Reciprocal Rank Fusion (`search/fusion.py`)](#module-1-reciprocal-rank-fusion-srcvideosdksearchfusionpy)
+   - [Module 2: Unified Search Coordinator (`search/searcher.py`)](#module-2-unified-search-coordinator-srcvideosdksearchsearcherpy)
+   - [Verification & Test Results](#verification--test-results-2)
 6. [Phase 4 — SDK Public API & CLI](#phase-4--sdk-public-api--cli-upcoming) *(Upcoming)*
 7. [Phase 5 — Testing & Evaluation Benchmarks](#phase-5--testing--evaluation-benchmarks-upcoming) *(Upcoming)*
 8. [Phase 6 — Documentation & Distribution](#phase-6--documentation--distribution-upcoming) *(Upcoming)*
@@ -400,11 +404,132 @@ Code style and formatting:
 
 ---
 
-## Phase 3 — Fusion & Ranking *(Upcoming)*
-*Goal*: Merge visual and speech candidate lists into a unified ranked result set.
-- [ ] Reciprocal Rank Fusion (RRF with $k=60$)
-- [ ] Search modes: `"visual"`, `"speech"`, `"both"`
-- [ ] End-to-end `SearchResult` dataclass with timestamp formatting and clipping
+## Phase 3 — Fusion & Ranking
+
+### Overview & Pipeline
+
+Phase 3 merges the multi-modal retrieval streams from Phase 1 (visual content) and Phase 2 (spoken audio) into a single, cohesive ranking.
+
+```
+                              Query String
+                                   │
+                  ┌────────────────┴────────────────┐
+                  ▼                                 ▼
+         [Visual Search Mode]              [Speech Search Mode]
+          OpenCLIP Text Encoder             MiniLM SentenceTransformer
+          (Load -> Encode -> Unload)        (Load -> Encode -> Unload)
+                  │                                 │
+                  ▼                                 ▼
+          visual.faiss (512-dim)            text.faiss (384-dim)
+          Top-K Visual Candidates           Top-K Speech Candidates
+                  │                                 │
+                  └────────────────┬────────────────┘
+                                   │
+                                   ▼
+                   [Reciprocal Rank Fusion (RRF)]
+                   Formula: SUM( 1 / (60 + rank_i) )
+                                   │
+                                   ▼
+                   [SQLite Metadata Resolution]
+                   Fetch video path, time bounds, transcript text
+                   Format timestamps (MM:SS / H:MM:SS)
+                   Attribute source: 'visual' | 'speech' | 'both'
+                                   │
+                                   ▼
+                       List[SearchResult] Objects
+```
+
+---
+
+### Module 1: Reciprocal Rank Fusion (`src/videosdk/search/fusion.py`)
+
+#### Purpose
+Combine ranked candidate lists from separate retrieval channels into a unified ranking without score calibration.
+
+#### Why RRF Over Weighted Score Averaging
+1. **Incompatible Score Scales**:
+   CLIP cosine similarity and MiniLM cosine similarity produce completely different value distributions. A score of `0.28` in CLIP might represent a very strong match for an abstract visual concept, while `0.28` in MiniLM might be a weak match. Directly summing or averaging them introduces strong bias towards whichever model outputs higher raw numbers.
+2. **Rank-Based Invariance**:
+   RRF uses only the *position* (1st, 2nd, 3rd...) of candidates in each list:
+   $$\text{RRF\_score}(d) = \sum_{m \in M} \frac{1}{k + r_m(d)}$$
+   where $k = 60$ is the standard smoothing constant (Cormack, Clarke, and Buettcher, 2009) and $r_m(d)$ is the 1-based rank position in modality $m$.
+3. **Synergy Boost**:
+   Candidates appearing in both modalities receive a significant reciprocal boost, naturally surfacing scenes where both visual cues and spoken dialogue match the query.
+
+#### Key Implementation
+```python
+def reciprocal_rank_fusion(
+    ranked_lists: Sequence[Sequence[tuple[int, float]]],
+    k: int = 60,
+) -> list[tuple[int, float]]:
+    if not ranked_lists:
+        return []
+
+    rrf_scores: dict[int, float] = {}
+    for ranked_list in ranked_lists:
+        for rank, (item_id, _original_score) in enumerate(ranked_list, start=1):
+            rrf_scores[item_id] = rrf_scores.get(item_id, 0.0) + (1.0 / (k + rank))
+
+    return sorted(rrf_scores.items(), key=lambda entry: entry[1], reverse=True)
+```
+
+---
+
+### Module 2: Unified Search Coordinator (`src/videosdk/search/searcher.py`)
+
+#### Purpose
+Provide a single search entry point supporting visual-only, speech-only, and hybrid multi-modal search while enforcing strict memory isolation.
+
+#### Key Features & Implementation Details
+
+1. **Strict Sequential Model Execution**:
+   - `_visual_search()` loads `CLIPEncoder`, encodes the query into a 512-dim vector, immediately executes `encoder.unload()`, and queries `visual_store`.
+   - `_speech_search()` loads `TextEncoder` on CPU, encodes the query into a 384-dim vector, immediately executes `encoder.unload()`, and queries `text_store`.
+   - The two encoders **never** coexist in memory, preserving the 4 GB VRAM ceiling.
+
+2. **Source Attribution**:
+   When searching with `mode="both"`, the coordinator determines how each segment was discovered:
+   ```python
+   in_visual = seg_id in visual_ids
+   in_speech = seg_id in speech_ids
+   if in_visual and in_speech:
+       source = "both"
+   elif in_visual:
+       source = "visual"
+   else:
+       source = "speech"
+   ```
+
+3. **Human-Readable Timestamp Formatting**:
+   ```python
+   def format_timestamp(seconds: float) -> str:
+       total_seconds = max(0, round(seconds))
+       hours, remainder = divmod(total_seconds, 3600)
+       minutes, secs = divmod(remainder, 60)
+       if hours > 0:
+           return f"{hours}:{minutes:02d}:{secs:02d}"
+       return f"{minutes:02d}:{secs:02d}"
+   ```
+   Converts seconds into `"MM:SS"` or `"H:MM:SS"` (e.g. `75.0` $\rightarrow$ `"01:15"`, `3665.0` $\rightarrow$ `"1:01:05"`).
+
+4. **Result Packaging**:
+   Hydrates SQLite metadata into public `SearchResult` dataclasses containing video path, start/end seconds, formatted timestamp, score, transcript text, and source attribution.
+
+---
+
+### Verification & Test Results
+
+All 8 tests in `tests/test_fusion.py` pass:
+- `test_rrf_basic`: Verifies mathematical scoring and overlapping item boost.
+- `test_rrf_single_list`: Handles single modality without degradation.
+- `test_rrf_empty`: Safely returns empty list on empty inputs.
+- `test_rrf_no_overlap`: Merges non-overlapping candidate lists cleanly.
+- `test_rrf_custom_k`: Validates configurable smoothing constant $k$.
+- `test_format_timestamp`: Validates timestamps across zero, seconds, minutes, and hours.
+- `test_searcher_validation_and_empty_query`: Rejects invalid modes and whitespace queries.
+- `test_searcher_modes_and_fusion`: Validates visual, speech, and hybrid both modes with source attribution.
+
+---
 
 ## Phase 4 — SDK Public API & CLI *(Upcoming)*
 - [ ] `VideoIndex` high-level class (`index_video`, `search`, `save`, `load`)
