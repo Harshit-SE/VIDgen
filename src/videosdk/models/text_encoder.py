@@ -87,7 +87,7 @@ class TextEncoder:
             1D numpy array of shape (384,) with float32 values.
         """
         result = self.encode([query])
-        return result[0]
+        return np.asarray(result[0], dtype=np.float32)
 
     def unload(self) -> None:
         """Purge the model from memory."""

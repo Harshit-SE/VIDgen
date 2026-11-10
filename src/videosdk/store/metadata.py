@@ -123,6 +123,7 @@ class MetadataStore:
                     added_at,
                 ),
             )
+            assert cursor.lastrowid is not None
             return int(cursor.lastrowid)
 
     def add_segments(

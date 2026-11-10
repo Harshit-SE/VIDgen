@@ -47,9 +47,6 @@ class CLIPEncoder:
 
         import open_clip
 
-        # When offline or cached, skip remote check to avoid HTTP timeout delays
-        os.environ.setdefault("HF_HUB_OFFLINE", "1")
-
         logger.info(
             "Loading CLIP model %s (%s) on %s",
             self.config.clip_model_name,
@@ -110,7 +107,7 @@ class CLIPEncoder:
             # L2-normalize vectors
             features = features / features.norm(dim=-1, keepdim=True)
 
-        return features.cpu().to(torch.float32).numpy()
+        return np.asarray(features.cpu().to(torch.float32).numpy(), dtype=np.float32)
 
     def encode_text(self, text: str) -> np.ndarray:
         """Encode a text query string into an L2-normalized 1x512 vector.
@@ -130,7 +127,7 @@ class CLIPEncoder:
             features = self.model.encode_text(tokens)
             features = features / features.norm(dim=-1, keepdim=True)
 
-        return features.cpu().to(torch.float32).numpy()
+        return np.asarray(features.cpu().to(torch.float32).numpy(), dtype=np.float32)
 
     def unload(self) -> None:
         """Explicitly purge model weights and free GPU memory."""
