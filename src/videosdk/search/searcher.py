@@ -190,8 +190,7 @@ class Searcher:
         if self.text_store.count() == 0:
             return []
 
-        resolved_device = get_device(device if isinstance(device, str) else "cpu")
-        encoder = TextEncoder(config=self.config, device=resolved_device)
+        encoder = TextEncoder(config=self.config)
         encoder.load()
         try:
             query_vec = encoder.encode([query])
