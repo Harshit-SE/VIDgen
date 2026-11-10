@@ -19,10 +19,11 @@
 9. [Phase 2 — Speech Search](#phase-2--speech-search)
 10. [Phase 3 — Combine and Rank (Fusion)](#phase-3--combine-and-rank-fusion)
 11. [Phase 4 — Turn It Into an SDK](#phase-4--turn-it-into-an-sdk)
-12. [Phase 5 — Tests, Eval Set, and Benchmarks](#phase-5--tests-eval-set-and-benchmarks)
-13. [Phase 6 — Docs, Polish, and Release](#phase-6--docs-polish-and-release)
-14. [Error Handling Strategy](#14-error-handling-strategy)
-15. [Testing Strategy](#15-testing-strategy)
+12. [Phase 4.5 — Advanced Multimodal Intelligence & Creator Tools](#phase-45--advanced-multimodal-intelligence--creator-tools)
+13. [Phase 5 — Tests, Eval Set, and Benchmarks](#phase-5--tests-eval-set-and-benchmarks)
+14. [Phase 6 — Docs, Polish, and Release](#phase-6--docs-polish-and-release)
+15. [Error Handling Strategy](#15-error-handling-strategy)
+16. [Testing Strategy](#16-testing-strategy)
 
 ---
 
@@ -1239,6 +1240,213 @@ Verify CLI and public API pass all integration tests. Update `TRACKER.md` and do
 
 ---
 
+## Phase 4.5 — Advanced Multimodal Intelligence & Creator Tools
+
+**Goal:** Elevate VideoSDK beyond basic text-to-video search into an industry-grade, multimodal intelligence engine with reverse visual search, automated highlight reels, video editor format exports (SRT/EDL/FCPXML), smart chapters, non-speech audio events, and an embedded zero-node local Web UI.
+
+### Architectural Positioning
+All Phase 4.5 capabilities build directly on the public `VideoIndex` orchestrator and core primitives without breaking backward compatibility or exceeding the **4 GB VRAM ceiling**:
+- Reverse visual search reuses the existing OpenCLIP vision model pipeline.
+- Highlight generation leverages the stream-copy and filter graph infrastructure in `clipper.py`.
+- Exporters are pure-Python transformation utilities without neural network overhead.
+- Smart chaptering and heatmaps use existing segment vectors and cosine similarity curves.
+- Sound event search introduces optional CLAP audio embedding under strict sequential memory lifecycle rules.
+- The Web UI provides a standalone local browser interface (`videosdk ui`) using Gradio/Streamlit.
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                          Creator Tools & Advanced Layer                         │
+│   Reverse Visual Search  │  Highlight Reels  │  Editor Exports  │  Web UI (Gradio)│
+└────────────────────────────────────────┬────────────────────────────────────────┘
+                                         │
+┌────────────────────────────────────────▼────────────────────────────────────────┐
+│                              VideoIndex API (index.py)                          │
+│ search(image=...) │ create_supercut() │ export_results() │ generate_chapters() │
+└────────────────────────────────────────┬────────────────────────────────────────┘
+                                         │
+┌──────────────────┬─────────────────────┼─────────────────────┬──────────────────┐
+│  CLIP Encoder    │  Whisper ASR + MiniLM│ CLAP Audio Events   │ FFmpeg Clipper   │
+│ (Image & Text)   │  (Spoken Words)     │ (Sound Effects)     │ & Reel Concat    │
+└──────────────────┴─────────────────────┴─────────────────────┴──────────────────┘
+```
+
+---
+
+### Step 4.5.1 — Reverse Visual Search (Image-to-Video Retrieval)
+
+**Module:** `src/videosdk/index.py` & `src/videosdk/models/clip_encoder.py`
+
+**What it does:** Allows users to query the index using an image (file path, URL, or PIL/NumPy image) to find every scene where that object, person, logo, landmark, or visual style appears across all indexed videos.
+
+**API Contract:**
+```python
+# Text search (existing)
+results = index.search(query="vintage sports car drifting")
+
+# Image-to-video search (new)
+results = index.search(image="path/to/reference_photo.jpg", top_k=5)
+
+# Combined multi-modal search (text + visual reference)
+results = index.search(query="in the mountains", image="car.jpg", top_k=5)
+```
+
+**Implementation Details:**
+1. Update `ClipEncoder.encode_query(query: str | Image.Image | Path | np.ndarray) -> np.ndarray`:
+   - If string and exists as a file path, load via PIL: `Image.open(file_path).convert("RGB")`.
+   - Preprocess through `clip_encoder.preprocess(img).unsqueeze(0)`.
+   - Pass through `clip_encoder.model.encode_image(tensor)` and L2-normalize (`vec / norm`).
+   - If both `query` and `image` are provided, compute both embeddings, average them with equal or customizable weight, and re-normalize before searching the visual FAISS index.
+2. Update `VideoIndex.search` and CLI `videosdk search --image path/to/image.jpg`.
+
+---
+
+### Step 4.5.2 — Automated Supercut / Highlight Reel Generator
+
+**Module:** `src/videosdk/video/clipper.py` & `src/videosdk/index.py`
+
+**What it does:** Takes search query results or specific topic matches and automatically compiles, trims, and stitches them into a single continuous video reel (e.g. "top 60 seconds of goal celebrations" or "summary of keynote announcements").
+
+**API Contract:**
+```python
+supercut_path = index.create_supercut(
+    query="standing ovation",
+    output_path="applause_reel.mp4",
+    max_duration=60.0,       # Total max duration in seconds
+    clip_padding=0.5,        # Seconds of lead-in/lead-out padding
+    merge_threshold=2.0,     # Merge adjacent clips if within 2 seconds
+    transition="crossfade",  # None | "cut" | "crossfade"
+)
+```
+
+**Implementation Details:**
+1. Run `search(query, top_k=20)`.
+2. Extract time ranges `[(start, end)]`.
+3. Apply temporal merging: if two candidate segments overlap or are within `merge_threshold` seconds of each other in the same video, merge them into a single interval `(start_1, end_2)` to prevent choppy jumps.
+4. Cumulative duration budgeting: sort by score, greedily select clips until `sum(durations) <= max_duration`, then re-sort selected clips chronologically per video.
+5. FFmpeg concat pipeline:
+   - Cut individual trimmed clips to a temporary scratch directory.
+   - For fast cuts (`transition="cut"`): write `concat.txt` manifest (`file 'clip_0.mp4' ...`) and invoke `ffmpeg -f concat -safe 0 -i concat.txt -c copy {output_path}`.
+   - For smooth crossfades: construct an FFmpeg filter graph `[0:v][1:v]xfade=transition=fade:duration=0.5[v]` to blend audio and video seamlessly.
+   - Clean up intermediate temporary files upon completion or failure.
+
+---
+
+### Step 4.5.3 — Professional Video Editor & Subtitle Exporters
+
+**Module:** `src/videosdk/export/exporters.py`
+
+**What it does:** Allows video editors, researchers, and content creators to export search hits directly into industry-standard NLE (Non-Linear Editor) marker files and subtitle tracks.
+
+**Supported Formats:**
+1. **SRT (`.srt`) & WebVTT (`.vtt`)**:
+   - Creates timed subtitle entries with search score and transcribed speech or visual label for display in VLC, YouTube, or web video players.
+2. **EDL (Edit Decision List - CMX 3600)**:
+   - Imports directly into DaVinci Resolve, Adobe Premiere Pro, and Final Cut Pro as timeline cuts.
+3. **FCPXML (Final Cut Pro XML)**:
+   - Imports into Final Cut Pro and DaVinci Resolve as colored sequence markers with search query notes.
+4. **CSV / JSON Cue Sheets**:
+   - Structured tabular exports for spreadsheets, archival databases, and production logs.
+
+**API Contract:**
+```python
+from videosdk.export import export_results
+
+results = index.search("explosion scene", top_k=10)
+
+# Export to subtitle file
+export_results(results, format="srt", output_path="scenes.srt")
+
+# Export to DaVinci Resolve / Premiere marker list
+export_results(results, format="edl", output_path="timeline.edl")
+
+# Export to structured CSV
+export_results(results, format="csv", output_path="metadata.csv")
+```
+
+---
+
+### Step 4.5.4 — Smart Video Chapters & Timeline Heatmaps
+
+**Module:** `src/videosdk/analytics/chapters.py` & `src/videosdk/analytics/heatmap.py`
+
+**What it does:**
+1. **Automated Chaptering**: Segments long-form videos (lectures, podcasts, webinars) into logical chapters with start timestamps, durations, and AI-summarized topic headers using transcript clustering and visual scene boundary density.
+2. **Timeline Relevance Heatmaps**: Computes a continuous similarity score (0.0 to 1.0) sampled every N seconds across the entire video timeline for a given query, enabling YouTube-style scrub bar engagement curves.
+
+**API Contract:**
+```python
+# Generate structured video chapters
+chapters = index.generate_chapters(
+    video_path="lecture.mp4",
+    min_chapter_duration=60.0,  # Minimum 1 minute per chapter
+)
+for ch in chapters:
+    print(f"[{ch.timestamp}] {ch.title} ({ch.duration:.1f}s)")
+
+# Generate scrub bar heatmap curve
+heatmap = index.generate_heatmap(
+    video_path="gameplay.mp4",
+    query="intense battle",
+    step_seconds=2.0,
+)
+# Returns list of dicts: [{"time": 0.0, "score": 0.12}, {"time": 2.0, "score": 0.89}, ...]
+```
+
+---
+
+### Step 4.5.5 — Non-Speech Audio / Sound Event Retrieval (CLAP)
+
+**Module:** `src/videosdk/models/audio_event.py`
+
+**What it does:** Extends speech search to non-verbal audio events: music genres, gunshots, screams, glass breaking, clapping/applause, car engines, animal sounds, laughing, and rain.
+
+**Architecture:**
+- Uses a lightweight audio-language contrastive model (e.g. `laion/larger_clap_general` or quantized HTSAT-CLAP).
+- Audio is extracted once into 16kHz mono WAV during Phase 2 ingestion.
+- While Whisper transcribes verbal speech, the CLAP encoder splits audio into 5-second overlapping windows to compute 512-dim audio event embeddings.
+- Stored in a third FAISS index: `audio_events.index`.
+- When users search with `mode="sound"` or `mode="all"`, Reciprocal Rank Fusion combines visual (CLIP), speech (Whisper+MiniLM), and sound events (CLAP).
+- **Memory Safety:** Loaded strictly sequentially; Whisper is purged before CLAP initializes. CLAP is purged before MiniLM initializes.
+
+---
+
+### Step 4.5.6 — Embedded Zero-Node Local Web UI (`videosdk ui`)
+
+**Module:** `src/videosdk/ui/app.py` & `src/videosdk/cli.py`
+
+**What it does:** Provides an out-of-the-box, zero-configuration web interface for visual and spoken video exploration running locally without needing Node.js, npm, or complex frontend builds.
+
+**CLI Command:**
+```bash
+videosdk ui --index ./my_video_index --port 7860
+```
+
+**Features:**
+1. **Interactive Search Bar**: Supports text search, image drag-and-drop search, and filter mode toggles (Visual / Speech / Hybrid).
+2. **Video Player with Deep Linking**: Clicking any search result card instantly seeks the HTML5 video player to the exact start timestamp.
+3. **Synchronized Transcript Sidebar**: Displays the aligned segment transcript with highlighted search keywords.
+4. **Instant Clip Export**: Single-click button to download the exact 10-second segment or trigger supercut creation.
+5. **System Telemetry Banner**: Displays active index statistics (indexed hours, segment count, disk size) and current VRAM usage.
+
+---
+
+### Step 4.5.7 — Unit & Integration Test Specifications
+
+Create `tests/test_advanced.py`:
+- `test_reverse_visual_search`: Verify PIL Image query returns matching visual segment vectors.
+- `test_supercut_interval_merging`: Verify overlapping intervals `[(0, 5), (4, 10)]` merge to `[(0, 10)]`.
+- `test_supercut_duration_cap`: Verify total stitched duration does not exceed `max_duration`.
+- `test_export_srt`: Verify generated `.srt` conforms to SubRip timestamp spec (`00:01:23,456 --> 00:01:28,789`).
+- `test_export_vtt`: Verify generated `.vtt` includes `WEBVTT` header and valid cues.
+- `test_export_edl`: Verify CMX 3600 standard formatting with correct timecodes.
+- `test_heatmap_generation`: Verify dense time step sampling across video duration.
+
+### Step 4.5.8 — Update TRACKER.md and notes.md
+
+Verify all advanced creator and multimodal features pass unit tests, update `TRACKER.md` checklist, and document technical patterns in `notes.md`.
+
+---
+
 ## Phase 5 — Tests, Eval Set, and Benchmarks
 
 **Goal:** Real measured numbers. Proof that it works.
@@ -1336,7 +1544,7 @@ Complete final documentation, benchmarks, and release checklists. Update `TRACKE
 
 ---
 
-## 14. Error Handling Strategy
+## 15. Error Handling Strategy
 
 **Principle:** Every error message must tell the user WHAT went wrong and HOW to fix it.
 
@@ -1352,7 +1560,7 @@ Complete final documentation, benchmarks, and release checklists. Update `TRACKE
 
 ---
 
-## 15. Testing Strategy
+## 16. Testing Strategy
 
 ### Unit tests (no real models, no real videos)
 

@@ -28,8 +28,9 @@ This document tracks technical decisions, architectural details, key code patter
    - [Module 2: Unified Search Coordinator (`search/searcher.py`)](#module-2-unified-search-coordinator-srcvideosdksearchsearcherpy)
    - [Verification & Test Results](#verification--test-results-2)
 6. [Phase 4 — SDK Public API & CLI](#phase-4--sdk-public-api--cli-upcoming) *(Upcoming)*
-7. [Phase 5 — Testing & Evaluation Benchmarks](#phase-5--testing--evaluation-benchmarks-upcoming) *(Upcoming)*
-8. [Phase 6 — Documentation & Distribution](#phase-6--documentation--distribution-upcoming) *(Upcoming)*
+7. [Phase 4.5 — Advanced Multimodal Intelligence & Creator Tools](#phase-45--advanced-multimodal-intelligence--creator-tools-upcoming) *(Upcoming)*
+8. [Phase 5 — Testing & Evaluation Benchmarks](#phase-5--testing--evaluation-benchmarks-upcoming) *(Upcoming)*
+9. [Phase 6 — Documentation & Distribution](#phase-6--documentation--distribution-upcoming) *(Upcoming)*
 
 ---
 
@@ -534,6 +535,14 @@ All 8 tests in `tests/test_fusion.py` pass:
 ## Phase 4 — SDK Public API & CLI *(Upcoming)*
 - [ ] `VideoIndex` high-level class (`index_video`, `search`, `save`, `load`)
 - [ ] Typer CLI (`videosdk index`, `videosdk search`, `videosdk clip`)
+
+## Phase 4.5 — Advanced Multimodal Intelligence & Creator Tools *(Upcoming)*
+- [ ] **Reverse Visual Search (Image-to-Video)**: Query visual FAISS index using image references (`index.search(image=...)`) via OpenCLIP `encode_image`.
+- [ ] **Automated Supercut / Highlight Reel Generator**: Stitch candidate clips into a continuous reel (`index.create_supercut(...)`) with temporal merging and FFmpeg concat/xfade.
+- [ ] **Video Editor & Subtitle Exporters**: Direct export of search results to `.srt`, `.vtt`, `.edl` (Premiere / DaVinci Resolve), `.fcpxml` (Final Cut Pro), and `.csv`.
+- [ ] **Smart Video Chapters & Timeline Heatmaps**: Unsupervised topic clustering into structured chapters and dense query-relevance scrub bar heatmaps.
+- [ ] **Non-Speech Audio Event Search**: Acoustic scene retrieval (clapping, gunshots, laughter, rain) using lightweight CLAP embeddings under sequential VRAM lifecycle.
+- [ ] **Embedded Zero-Node Local Web UI**: Built-in browser app (`videosdk ui`) with deep-linked video playback, interactive timeline scrubbers, and clip export.
 
 ## Phase 5 — Testing & Evaluation Benchmarks *(Upcoming)*
 - [ ] Evaluation benchmark with synthetic & real video ground truths

@@ -17,6 +17,7 @@
 | 2 | Speech search | [x] | 2026-11-06 | 2026-11-06 |
 | 3 | Combine and rank | [x] | 2026-11-10 | 2026-11-10 |
 | 4 | Turn it into an SDK | [ ] | | |
+| 4.5 | Advanced Multimodal & Creator Tools | [ ] | | |
 | 5 | Tests, eval set and benchmarks | [ ] | | |
 | 6 | Docs, polish and release | [ ] | | |
 
@@ -128,6 +129,45 @@
 **Done when:** the example code in section 5 runs without edits, CLI works, mypy and ruff pass.
 
 **Risks covered:** 5, 8, 10, 15.
+
+---
+
+## Phase 4.5: Advanced Multimodal Intelligence & Creator Tools
+
+**Goal:** Provide industry-grade multimodal retrieval, automated video editing exports, and an embedded local UI to outperform alternative video RAG systems.
+
+- [ ] **Reverse Visual Search (Image-to-Video)**:
+  - [ ] `ClipEncoder.encode_query`: support image inputs (file path, PIL Image, numpy array) via `encode_image`
+  - [ ] Support `index.search(image="reference.jpg")` and hybrid multimodal `index.search(query="...", image="...")`
+  - [ ] CLI support: `videosdk search --image path/to/image.jpg`
+- [ ] **Automated Supercut / Highlight Reel Generator**:
+  - [ ] `index.create_supercut(query="...", output_path="reel.mp4", max_duration=60)`
+  - [ ] Temporal proximity merging (merge segments within threshold to prevent jerky cuts)
+  - [ ] FFmpeg concat demuxer assembly with cut or xfade transitions
+- [ ] **Video Editor & Subtitle Exporters (`videosdk/export/exporters.py`)**:
+  - [ ] SubRip Subtitles (`.srt`) exporter with timestamps and scores
+  - [ ] WebVTT (`.vtt`) exporter for HTML5 video players
+  - [ ] Edit Decision List (`.edl` - CMX 3600) exporter for Adobe Premiere Pro and DaVinci Resolve
+  - [ ] Final Cut Pro XML (`.fcpxml`) sequence markers
+  - [ ] Tabular CSV / JSON cue sheet exporter
+- [ ] **Smart Video Chapters & Timeline Heatmaps (`videosdk/analytics/`)**:
+  - [ ] `index.generate_chapters(video_path)`: automated chapter boundaries with generated titles
+  - [ ] `index.generate_heatmap(video_path, query)`: continuous timeline relevance curve for scrub bars
+- [ ] **Non-Speech Audio Event Search (CLAP)**:
+  - [ ] Lightweight CLAP audio-text encoder for sound effects (applause, gunshots, laughter, rain)
+  - [ ] 5-second sliding window audio event embeddings stored in `audio_events.index`
+  - [ ] 3-way Reciprocal Rank Fusion: visual + speech + sound
+  - [ ] Strict sequential lifecycle: Whisper unloaded before CLAP loads
+- [ ] **Embedded Zero-Node Local Web UI (`videosdk ui`)**:
+  - [ ] Built-in Gradio/Streamlit UI launched via `videosdk ui --index ./index_dir`
+  - [ ] Text & image search with live video player and timestamp deep-linking
+  - [ ] Synchronized transcript sidebar with highlighted keywords
+  - [ ] Single-click segment clipping and highlight reel creation
+- [ ] Comprehensive test suite in `tests/test_advanced.py` covering image search, supercuts, and exporters
+
+**Done when:** Image-to-video search retrieves visual scenes, `create_supercut()` outputs valid stitched video, export formats import into video editors, and `videosdk ui` launches in browser.
+
+**Risks covered:** Multimodal coverage, competitive superiority over text-only video RAG, NLE workflow compatibility.
 
 ---
 
